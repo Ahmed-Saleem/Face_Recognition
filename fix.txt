@@ -1,0 +1,11 @@
+In /home/ahmed/anaconda3/envs/yolo_face/lib/python3.8/site-packages/torch/nn/modules/upsampling.py in line 153-154:
+Change:
+
+  return F.interpolate(input, self.size, self.scale_factor, self.mode, self.align_corners,
+recompute_scale_factor=self.recompute_scale_factor)
+
+To:
+
+  return F.interpolate(input, self.size, self.scale_factor, self.mode, self.align_corners,
+# recompute_scale_factor=self.recompute_scale_factor
+)
