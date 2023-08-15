@@ -29,7 +29,7 @@ prev_frame_labels = []
 # model = attempt_load("yolov5_face/yolov5s-face.pt", map_location=device)
 
 ## Case 2:
-model = attempt_load("yolov5_face/yolov5m-face.pt", map_location=device)
+model = attempt_load("yolov5_face\yolov5m-face.pt", map_location=device)
 
 # Get model recognition
 ## Case 1: 
