@@ -15,6 +15,7 @@ import cv2
 import pandas as pd
 from datetime import datetime
 import json
+import glob
 from moviepy.editor import VideoFileClip, AudioFileClip
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
@@ -214,7 +215,7 @@ def delete_file(file_path):
         print(f"File '{file_path}' has been deleted.")
     else:
         print(f"File '{file_path}' does not exist.")
-import glob
+
 def main():
     # global isThread, score, name, prev_frame_faces, prev_frame_labels
     input_path = glob.glob("uploads/videos/*.mp4")
