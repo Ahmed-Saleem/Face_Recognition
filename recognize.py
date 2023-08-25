@@ -29,7 +29,7 @@ prev_frame_labels = []
 # model = attempt_load("yolov5_face/yolov5s-face.pt", map_location=device)
 
 ## Case 2:
-model = attempt_load("yolov5_face\yolov5m-face.pt", map_location=device)
+model = attempt_load("yolov5_face/yolov5m-face.pt", map_location=device)
 
 # Get model recognition
 ## Case 1: 
@@ -165,8 +165,8 @@ def recognition(face_image, images_names, images_embs):
 
 def main():
     # global isThread, score, name, prev_frame_faces, prev_frame_labels
-    input_path = "/home/ahmed/facenet-pytorch/testing_videos/test.mp4"
-    output_path = "/home/ahmed/face-recognition/output_videos/output_test.mp4"
+    input_path = "/home/ahmed/facenet-pytorch/testing_videos/test/Ahsan_Iqbal2.mp4"
+    output_path = "/home/ahmed/face-recognition/output_videos/output_Ahsan_Iqbal2.mp4"
     # scale_factor = 0.5
     
     # Read features

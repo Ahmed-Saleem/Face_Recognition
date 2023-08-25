@@ -1,13 +1,11 @@
-import os
-os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE" 
-
 #pytorch
 from concurrent.futures import thread
 from sqlalchemy import null
 import torch
 from torchvision import transforms
 import time
-from threading import Thread
+import os
+
 
 #other lib
 import sys
@@ -39,12 +37,12 @@ person_data = []
 # model = attempt_load("yolov5_face/yolov5s-face.pt", map_location=device)
 
 ## Case 2:
-model = attempt_load("yolov5_face\yolov5m-face.pt", map_location=device)
+model = attempt_load("yolov5_face/yolov5m-face.pt", map_location=device)
 
 # Get model recognition
 ## Case 1: 
 from insightface.insight_face import iresnet100
-weight = torch.load("insightface\resnet100_backbone.pth", map_location = device)
+weight = torch.load("insightface/resnet100_backbone.pth", map_location = device)
 model_emb = iresnet100()
 
 ## Case 2: 
@@ -210,13 +208,20 @@ def merge_audio_into_video(video_path, audio_path, output_path):
     
     audio_clip.close()
     video_clip.close()
+    
+def delete_file(file_path):
+    if os.path.exists(file_path):
+        os.remove(file_path)
+        print(f"File '{file_path}' has been deleted.")
+    else:
+        print(f"File '{file_path}' does not exist.")
 
 def main():
     # global isThread, score, name, prev_frame_faces, prev_frame_labels
-    input_path = "testing_videos\Arif_Alvi2.mp4"
-    output_path = "output_videos\output_Arif_Alvi2.mp4"
-    audio_path = "output_videos\output_Arif_Alvi2.mp3"
-    output_with_audio = "output_videos\output_Arif_Alvi2_with_audio.mp4"
+    input_path = "/home/ahmed/facenet-pytorch/testing_videos/test/Ahsan_Iqbal3.mp4"
+    output_without_audio_path = "output_videos/output_without_audio.mp4"
+    audio_path = "output_videos/audio.mp3"
+    output_path = "output_videos/output.mp4"
     # scale_factor = 0.5
     
     # Read features
@@ -247,7 +252,7 @@ def main():
     frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     output_fps = cap.get(cv2.CAP_PROP_FPS)
     size = (frame_width, frame_height)
-    video = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*'mp4v'), output_fps, size)
+    video = cv2.VideoWriter(output_without_audio_path, cv2.VideoWriter_fourcc(*'mp4v'), output_fps, size)
     
     # Add frame interval
     frame_interval = int(output_fps / 3)
@@ -388,28 +393,39 @@ def main():
     cap.release()
     cv2.destroyAllWindows()
     cv2.waitKey(0)
-    print("Video saved at: ", output_path)
+    print("Video without audio saved at: ", output_without_audio_path)
     
     # Extract audio from input video
     extract_audio(input_path, audio_path)
     
     # Merge audio into output video
-    merge_audio_into_video(output_path, audio_path, output_with_audio)
+    merge_audio_into_video(output_without_audio_path, audio_path, output_path)
     
     # Convert the dictionary to a DataFrame
     df = pd.DataFrame(person_data)
     condition = condition = df['timestamps'].apply(len) > 0
     filtered_df = df[condition]
-    #print("data:", filtered_df)
+    print("data:", filtered_df)
     
     # DataFrame to .json file
-    file_path = "scripts\data.json"
+    file_path = "output_videos/data.json"
     json_data = filtered_df.to_json(orient='records')
     
     # Write the data to the JSON file
     with open(file_path, "w") as json_file:
         json.dump(json_data, json_file)
     print("Data saved to:", file_path)
+  
+    # Define the output CSV file path
+    output_csv_path = "output_videos/data.csv"
+
+    # Save the DataFrame to a CSV file
+    filtered_df.to_csv(output_csv_path, index=False)
+    print(f"DataFrame saved to '{output_csv_path}'.")
+    
+    # Delete temporary files
+    delete_file(output_without_audio_path)
+    delete_file(audio_path)
     
     end_total_time = time.time()
     total_time = end_total_time - start_total_time

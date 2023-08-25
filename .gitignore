@@ -3,7 +3,10 @@ yolov5_face/*.pt
 insightface/*.pth
 insightface/__pycache__
 static/results/*.mp4
-
+testing_videos
+input_chunks/
+output_videos/
+test_kenya
 insightface/resnet100_backbone.pth
 insightface/resnet18_backbone.pth
 yolov5_face/yolov5m-face.pt
