@@ -10,5 +10,6 @@ test_kenya
 insightface/resnet100_backbone.pth
 insightface/resnet18_backbone.pth
 yolov5_face/yolov5m-face.pt
+database/
 
 

@@ -452,7 +452,7 @@ if __name__=="__main__":
     chunk_duration = "6"
     # total_chunks = 1 
     input_dir = "input_chunks"
-    url = "https://www.youtube.com/watch?v=-k9xQwkwC9g&ab_channel=DunyaNews"
+    url = "https://www.youtube.com/watch?v=sUKwTVAc0Vo"
     output_without_audio_path = "output_without_audio.mp4"
     audio_path = "audio.aac"
     output_dir = "output_videos"

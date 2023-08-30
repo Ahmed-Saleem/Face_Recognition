@@ -7,6 +7,9 @@ import time
 import os
 import subprocess
 import threading
+import queue
+import pafy
+import ffmpeg
 
 #other lib
 import shutil
@@ -107,7 +110,7 @@ def scale_coords_landmarks(img1_shape, coords, img0_shape, ratio_pad=None):
 
 def get_face(input_image):
     # Parameters
-    size_convert = 704
+    size_convert = 736
     conf_thres = 0.75
     iou_thres = 0.75
     
@@ -164,6 +167,27 @@ def recognition(face_image, images_names, images_embs):
     name = images_names[id_min]
     return name, score
 
+def time_str(total_seconds):
+    seconds = total_seconds % 60
+    total_minutes = total_seconds // 60
+    minutes = total_minutes % 60
+    hours = total_minutes // 60
+    timestamp_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+    return timestamp_str
+
+def time_to_seconds(timestamp_str):
+    try:
+        hours, minutes, seconds = map(int, timestamp_str.split(":"))
+        total_seconds = hours * 3600 + minutes * 60 + seconds
+        return total_seconds
+    except ValueError:
+        raise ValueError("Invalid timestamp format. Use hh:mm:ss")
+    
+def numpy_array_to_base64(image_array, format='.jpg'):
+    _, buffer = cv2.imencode(format, image_array)
+    base64_image = base64.b64encode(buffer).decode()
+    return base64_image
+
 def extract_audio(video_path, audio_output_path):
     ffmpeg_cmd = [
     'ffmpeg',
@@ -190,29 +214,29 @@ def merge_audio_into_video(video_path, audio_path, output_path):
     ]
     subprocess.run(ffmpeg_cmd, check=True)
     
-def append_chunk_to_video(video_paths, output_video_path):
-    # Create a text file containing the list of video files to concatenate
-    video_list = "vidlist.txt"
-    with open(video_list, "w") as f:
-        for path in video_paths:
-            f.write(f"file '{path}'\n")
+# def append_chunk_to_video(video_paths, output_video_path):
+#     # Create a text file containing the list of video files to concatenate
+#     video_list = "vidlist.txt"
+#     with open(video_list, "w") as f:
+#         for path in video_paths:
+#             f.write(f"file '{path}'\n")
     
-    # Run the FFmpeg command
-    ffmpeg_cmd = [
-        "ffmpeg",
-        "-f", "concat",
-        "-safe", "0",
-        "-i", video_list,
-        "-c", "copy",
-        output_video_path
-    ]
+#     # Run the FFmpeg command
+#     ffmpeg_cmd = [
+#         "ffmpeg",
+#         "-f", "concat",
+#         "-safe", "0",
+#         "-i", video_list,
+#         "-c", "copy",
+#         output_video_path
+#     ]
 
-    subprocess.run(ffmpeg_cmd)
-    print("Videos concatenated successfully.")
+#     subprocess.run(ffmpeg_cmd)
+#     print("Videos concatenated successfully.")
 
-    # Clean up the temporary video list file
-    if os.path.exists(video_list):
-        os.remove(video_list)
+#     # Clean up the temporary video list file
+#     if os.path.exists(video_list):
+#         os.remove(video_list)
 
 
 def delete_file(file_path):
@@ -231,7 +255,8 @@ def delete_mp4_files(directory):
             print(f"Deleted: {file_path}")
 
 def processing_chunk(input_path, output_without_audio_path):
-    # Open video 
+    global json_data
+    # Open video
     cap = cv2.VideoCapture(input_path)
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))  # Get total frames of the input video
     frame_count = 0
@@ -269,12 +294,12 @@ def processing_chunk(input_path, output_without_audio_path):
                 cv2.rectangle(frame, (x1, y1), (x1 + t_size[0], y1 + t_size[1]), (0, 146, 230), -1)
                 cv2.putText(frame, label, (x1, y1 + t_size[1]), cv2.FONT_HERSHEY_PLAIN, 2, [255, 255, 255], 2)
             video.write(frame)
-            # Calculate and display the FPS
-            new_time = time.time()
-            fps = 1 / (new_time - start_time)
-            start_time = new_time
-            fps_label = "FPS: {:.2f}".format(fps)
-            print(fps_label)
+            # # Calculate and display the FPS
+            # new_time = time.time()
+            # fps = 1 / (new_time - start_time)
+            # start_time = new_time
+            # fps_label = "FPS: {:.2f}".format(fps)
+            # print(fps_label)
             #cv2.putText(frame, fps_label, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
             continue
 
@@ -296,10 +321,14 @@ def processing_chunk(input_path, output_without_audio_path):
         # Get boxs
         prev_frame_faces = []
         prev_frame_labels = []
-        # # Get the current position of the video capture
-        # position_ms = cap.get(cv2.CAP_PROP_POS_MSEC)
-        # timestamp_seconds = int(position_ms / 1000)
-        # frame_timestamp= time_str(timestamp_seconds)
+        # Get the current position of the video capture
+        position_ms = cap.get(cv2.CAP_PROP_POS_MSEC)
+        for e in range(len(time_list)):
+            if time_list[e]['filename'] == input_path:
+                timestamp_seconds = int((position_ms / 1000) + time_to_seconds(time_list[e]['download_timestamp']))
+                frame_timestamp = time_str(timestamp_seconds)
+                del time_list[e]
+                
         for i in range(len(bboxs)):
             # Get location face
             x1, y1, x2, y2 = bboxs[i]
@@ -337,19 +366,25 @@ def processing_chunk(input_path, output_without_audio_path):
                     cv2.putText(frame, label, (x1, y1 + t_size[1]), cv2.FONT_HERSHEY_PLAIN, 2, [255, 255, 255], 2)
                 else:
                     label = name.replace("_", " ")
-                    # for p in person_data:
-                    #     if label == p['name']:
-                    #         p['timestamps'].append(frame_timestamp)
-                    #         if p['thumbnail'] == None:
-                    #             p['thumbnail'] = numpy_array_to_base64(face_image)
+                    for p in person_data:
+                        if label == p['name']:
+                            p['timestamps'].append(frame_timestamp)
+                            if p['thumbnail'] == None:
+                                p['thumbnail'] = numpy_array_to_base64(face_image)
+                        if len(p['timestamps']) > 1:
+                            if len(p['startTime']) == 0:
+                                p['startTime'].append(p['timestamps'][0])
+                            if time_to_seconds(p['timestamps'][-1]) - time_to_seconds(p['timestamps'][-2]) > 2:
+                                p['startTime'].append(p['timestamps'][-1])
+                                p['endTime'].append(p['timestamps'][-2])
+                                p['coverageTime'] = time_str(time_to_seconds(p['coverageTime']) + (time_to_seconds(p['endTime'][-1]) - time_to_seconds(p['startTime'][-2]))) 
                     caption = f"{label}:{score:.2f}"
                     prev_frame_labels.append(label)
                     prev_frame_faces.append(bboxs[i])
                     #print("Detected: ", caption, "with score: ", score)
                     t_size = cv2.getTextSize(caption, cv2.FONT_HERSHEY_PLAIN, 2, 2)[0]
                     cv2.rectangle(frame, (x1, y1), (x1 + t_size[0], y1 + t_size[1]), (0, 146, 230), -1)
-                    cv2.putText(frame, caption, (x1, y1 + t_size[1]), cv2.FONT_HERSHEY_PLAIN, 2, [255, 255, 255], 2)       
-        
+                    cv2.putText(frame, caption, (x1, y1 + t_size[1]), cv2.FONT_HERSHEY_PLAIN, 2, [255, 255, 255], 2)
         # Count fps 
         video.write(frame)
         #cv2.imshow("Face Recognition", frame)
@@ -363,115 +398,213 @@ def processing_chunk(input_path, output_without_audio_path):
     cv2.destroyAllWindows()
     cv2.waitKey(0)
     print("Video without audio saved at: ", output_without_audio_path)
+    
+    # Convert the dictionary to a DataFrame
+    df = pd.DataFrame(person_data)
+    condition = df['timestamps'].apply(len) >= 10
+    filtered_df = df[condition]
+    print("data:", filtered_df)
+    
+    # DataFrame to .json file
+    file_path = "output_videos/data.json"
+    json_data = filtered_df.to_json(orient='records')
+    
+    if filtered_df is not None:
+        # Write the data to the JSON file
+        with open(file_path, "w") as json_file:
+            json.dump(json_data, json_file)
+        print("Data saved to:", file_path)
+        
+        # Define the output CSV file path
+        output_csv_path = "output_videos/data.csv"
 
-def download_youtube_chunks(url, input_dir, chunk_duration):
-    print("Counter", chunk_counter)
+        # Save the DataFrame to a CSV file
+        filtered_df_copy = filtered_df.drop('thumbnail', axis=1)
+        filtered_df_copy.to_csv(output_csv_path, index=False)
+        print(f"DataFrame saved to '{output_csv_path}'.")
+    
+    # # Remaining data
+    # for p in person_data:
+    #     if len(p['timestamps']) >= 10:
+    #         p['startTime'].append(p['timestamps'][0])
+    #         for t in range(0,len(p['timestamps'])):
+    #             ts = time_to_seconds(p['timestamps'][t])
+    #             prev_ts = time_to_seconds(p['timestamps'][t-1])
+    #             if ts - prev_ts >= 2:
+    #                 p['startTime'].append(p['timestamps'][t])
+    #                 p['endTime'].append(p['timestamps'][t-1])
+    #         if len(p['startTime']) != len(p['endTime']):
+    #             if len(p['startTime']) > len(p['endTime']):
+    #                 p['endTime'].append(p['timestamps'][-1])
+    #             else:
+    #                 p['endTime'][:-1]
+    #         #print('start',len(p['startTime']))
+    #         #print('end',len(p['endTime']))
+    #         for tt in range(0, len(p['startTime'])):
+    #             tts = (time_to_seconds(p['endTime'][tt]) - time_to_seconds(p['startTime'][tt]))
+    #             coverage_time = coverage_time + tts
+    #         p['coverageTime'] = time_str(coverage_time)
+        
+    
+  
+    # # Define the output CSV file path
+    # output_csv_path = "output_videos/data.csv"
+
+    # # Save the DataFrame to a CSV file
+    # filtered_df.to_csv(output_csv_path, index=False)
+    # print(f"DataFrame saved to '{output_csv_path}'.")
+    
+def download_chunk(url, input_dir, chunk_duration):
+    download_start_time = time.time()
     if os.path.exists(input_dir):
         pass
     else:
         os.makedirs(input_dir)
+    chunk_filename = os.path.join(input_dir, f"chunk_{chunk_counter}.mp4")
     print("Downloading chunks")
-    chunk_filename = f"input_chunks/chunk_{chunk_counter}.mp4"
-    
     cmd = [
         "streamlink",
-        url,
-        "720p",
+        "--hls-duration", str(chunk_duration),
         "-o",
         chunk_filename,
-        "--hls-duration", chunk_duration,  # Limit the duration to 4 seconds
+        url,
+        "best",
         "--hls-segment-threads" , "5",
-        "--hls-live-edge", "99999",  # Adjust as needed
+        "--hls-live-edge", "99999",
         "--stream-timeout", "1215",
         "--force"
     ]
-
+    current_time = datetime.now().time().strftime('%H:%M:%S')
     subprocess.run(cmd, capture_output=True, text=True)
-
     print(f"Downloaded chunk {chunk_counter}")
+    download_end_time = time.time()
+    chunk_queue.put(chunk_filename)
+    time_dict['filename'] = chunk_filename
+    time_dict['download_timestamp'] = current_time
+    time_list.append(time_dict)
+    download_time = download_end_time - download_start_time
+    print("Chunk downloading time: ", download_time)
+    time.sleep(abs(chunk_duration - download_time))
 
 def processing_thread():
+    processing_start = time.time()
     # Process each chunk
-
-    input_path = os.path.join(input_dir, os.listdir(input_dir)[0])
+    # Get a downloaded chunk from the queue
+    input_path = chunk_queue.get()  # Adjust timeout as needed
+    
+    # Extract audio
     extract_audio(input_path, audio_path)
-        
+    
     # Process video
     processing_chunk(input_path, output_without_audio_path)
 
     # Merge audio into output video
-    chunk_output_path = os.path.join(output_dir, f"chunk_output.mp4")
+    chunk_output_path = os.path.join(output_dir, f"chunk_output_{chunk_counter}.mp4")
     print("output path:", chunk_output_path)
     merge_audio_into_video(output_without_audio_path, audio_path, chunk_output_path)
 
     delete_file(audio_path)
     delete_file(output_without_audio_path)
-    if chunk_counter == 2:
-        shutil.move(chunk_output_path, final_output_video_path)
-    else:
-        shutil.move(final_output_video_path, output_path)
-        video_paths = [output_path, chunk_output_path]
-        append_chunk_to_video(video_paths, final_output_video_path)
-        delete_file(output_path)
     delete_file(input_path)
-
+    processing_end = time.time()
+    total_processing_time = processing_end - processing_start
+    print("Chunk processing time: ", total_processing_time)
+    
+    # # Append output video
+    # if chunk_counter == 2:
+    #     shutil.move(chunk_output_path, final_output_video_path)
+    # else:
+    #     shutil.move(final_output_video_path, output_path)
+    #     video_paths = [output_path, chunk_output_path]
+    #     append_chunk_to_video(video_paths, final_output_video_path)
+    #     delete_file(output_path)
+    
+            
 def main():
-     
-      if len(os.listdir(input_dir)) < 1:   
-        # downloading chunks
-        print("Download without threading")
-        download_youtube_chunks(url, input_dir, chunk_duration)
-        
-      else:
+    global chunk_counter
+    while(1):
+        chunk_counter +=1
         # Start the thread for downloading chunks
-        download_thread = threading.Thread(target=download_youtube_chunks, args=(url, input_dir, chunk_duration))
+        download_thread = threading.Thread(target=download_chunk, args=(url, input_dir, chunk_duration))
         print("Download with threading")
         download_thread.daemon = True
         download_thread.start()
-        
+    
         # Start the thread for processing downloaded chunks
         process_thread = threading.Thread(target=processing_thread)
         print("Process with threading")
         process_thread.start()
-        
+
         # Wait for both threads to finish
         # print("download join")
         # download_thread.join()
         print("process join")
         process_thread.join()
         print("all join")
+    return json_data 
 
+# Read features
+global images_names, images_embs
+images_names, images_embs = read_features()
+print("Read features successful")
+
+# Define a queue for passing chunks between threads
+chunk_queue = queue.Queue()
+
+# list of download timestamps
+time_dict = {
+        'filename' : '',
+        'download_timestamp' : '00:00:00'
+}
+time_list = []
+
+# create list of timestamps
+label_names = list(set(images_names))
+for n in label_names:
+    n = n.replace("_", " ")
+    person_entry = {
+        'thumbnail': None,
+        'name': n,
+        'timestamps': [],
+        'startTime': [],
+        'endTime': [],
+        'coverageTime': '00:00:00'
+    }
+    # Append the dictionary to the list
+    person_data.append(person_entry)
+ 
+chunk_duration = 5
+# total_chunks = 1 
+input_dir = "input_chunks"
+url = "https://www.youtube.com/watch?v=sUKwTVAc0Vo"
+output_without_audio_path = "output_without_audio.mp4"
+audio_path = "audio.aac"
+output_dir = "output_videos"
+output_path = os.path.join(output_dir, "output.mp4")
+final_output_video_path = os.path.join(output_dir, "final_output.mp4")
+chunk_counter = 0
+delete_mp4_files(output_dir)
+delete_mp4_files(input_dir)
 
 if __name__=="__main__":
-    
-    # Read features
-    global images_names, images_embs
-    images_names, images_embs = read_features()
-    print("Read features successful")
-    
-    chunk_duration = "6"
-    # total_chunks = 1 
-    input_dir = "input_chunks"
-    url = "https://www.youtube.com/watch?v=sUKwTVAc0Vo"
-    output_without_audio_path = "output_without_audio.mp4"
-    audio_path = "audio.aac"
-    output_dir = "output_videos"
-    output_path = os.path.join(output_dir, "output.mp4")
-    final_output_video_path = os.path.join(output_dir, "final_output.mp4")
-    chunk_counter = 0
-    delete_mp4_files(output_dir)
-    delete_mp4_files(input_dir)
-    while(1):
-        # if chunk_counter == 50:
-        #     chunk_counter = 0
-        
-        chunk_counter +=1
-        start_total_time = time.time()
-        main()
-        print("Number of processed chunks:", chunk_counter)
-        end_total_time = time.time()
-        total_time = end_total_time - start_total_time 
-        print("Total chunk processing time:", total_time)
+    main()
+
+# if __name__=="__main__":
+#     while(1):
+#         chunk_counter +=1
+#         start_total_time = time.time()
+#         if len(os.listdir(input_dir)) < 1:   
+#             # downloading chunks
+#             print("Download without threading")
+#             download_chunk(url, input_dir, chunk_duration)
+#         else:
+#             main()
+#         print("Number of processed chunks:", chunk_counter)
+#         end_total_time = time.time()
+#         total_time = end_total_time - start_total_time 
+#         print("Total chunk time:", total_time)
+#         # if chunk_counter % 4320 == 0:
+#         #     delete_mp4_files(output_dir)
         
 
 
