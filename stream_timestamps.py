@@ -369,8 +369,11 @@ def processing_chunk(input_path, output_without_audio_path, chunk_timestamp):
                             p['timestamps'].append(frame_timestamp)
                             if p['thumbnail'] == None:
                                 p['thumbnail'] = numpy_array_to_base64(face_image)
-                            if len(p['timestamps']) > 9:
-                                p['coverageTime'] = time_str(time_to_seconds(p['timestamps'][-1]) - time_to_seconds(p['timestamps'][0]))
+                            if len(p['timestamps']) > 1:
+                                if time_to_seconds(p['timestamps'][-1]) - time_to_seconds(p['timestamps'][-2]) > 3:
+                                    pass
+                                else:
+                                    p['coverageTime'] = time_str(time_to_seconds(p['coverageTime']) + (time_to_seconds(p['timestamps'][-1]) - time_to_seconds(p['timestamps'][-2])))
                     caption = f"{label}:{score:.2f}"
                     prev_frame_labels.append(label)
                     prev_frame_faces.append(bboxs[i])
