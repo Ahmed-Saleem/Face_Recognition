@@ -114,7 +114,7 @@ def scale_coords_landmarks(img1_shape, coords, img0_shape, ratio_pad=None):
 
 def get_face(input_image):
     # Parameters
-    size_convert = 704
+    size_convert = 1056
     conf_thres = 0.75
     iou_thres = 0.75
     
@@ -370,10 +370,9 @@ def processing_chunk(input_path, output_without_audio_path, chunk_timestamp):
                             if p['thumbnail'] == None:
                                 p['thumbnail'] = numpy_array_to_base64(face_image)
                             if len(p['timestamps']) > 1:
-                                if time_to_seconds(p['timestamps'][-1]) - time_to_seconds(p['timestamps'][-2]) > 3:
-                                    pass
-                                else:
+                                if time_to_seconds(p['timestamps'][-1]) - time_to_seconds(p['timestamps'][-2]) <= 5:
                                     p['coverageTime'] = time_str(time_to_seconds(p['coverageTime']) + (time_to_seconds(p['timestamps'][-1]) - time_to_seconds(p['timestamps'][-2])))
+                                    
                     caption = f"{label}:{score:.2f}"
                     prev_frame_labels.append(label)
                     prev_frame_faces.append(bboxs[i])
@@ -547,7 +546,7 @@ def main():
         person_data.append(person_entry)
     
     output_without_audio_path = "output_without_audio.mp4"
-    audio_path = "audio.aac"
+    audio_dir = "audio_chunks"
     output_dir = "output_videos"
     output_chunk_counter = 0
     # output_path = os.path.join(output_dir, "output.mp4")
@@ -556,12 +555,16 @@ def main():
     if not os.path.exists(output_dir):
         os.mkdir(output_dir)
     
+    if not os.path.exists(audio_dir):
+        os.mkdir(audio_dir)
+    
     # Start the download_chunks.py thread as a daemon
     download_thread = threading.Thread(target=run_download_chunks, daemon=True)
     download_thread.start()
     
     while(1):
         if not chunk_queue.empty():
+            audio_path = os.path.join(audio_dir, f"audio_chunk_{chunk_counter}.aac")
             input_time_dict = chunk_queue.get()
             input_path = input_time_dict['filename']
             chunk_timestamp = input_time_dict['download_timestamp']
@@ -579,7 +582,7 @@ def main():
             print("output path:", chunk_output_path)
             merge_audio_into_video(output_without_audio_path, audio_path, chunk_output_path)
 
-            delete_file(audio_path)
+            # delete_file(audio_path)
             delete_file(output_without_audio_path)
 
             processing_end = time.time()
