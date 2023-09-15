@@ -34,6 +34,26 @@ from models.experimental import attempt_load
 from utils.datasets import letterbox
 from utils.general import check_img_size, non_max_suppression_face, scale_coords
 
+# Connect to database
+import psycopg2
+
+try:
+    conn = psycopg2.connect(
+        dbname="FR",
+        user="postgres",
+        password="ticker1234",
+        host="127.0.0.1",
+        port="5432"
+    )
+    print("Connected to the database.")
+except psycopg2.Error as e:
+    print("Error connecting to the database:", e)
+
+try:
+    cursor = conn.cursor()
+except psycopg2.Error as e:
+    print("Error creating a cursor:", e)
+
 # Check device
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -201,7 +221,6 @@ def extract_audio(video_path, audio_output_path):
     audio_output_path   # Output audio file
     ]
     subprocess.run(ffmpeg_cmd, check=True)
-
     
 def merge_audio_into_video(video_path, audio_path, output_path):
     ffmpeg_cmd = [
@@ -395,19 +414,42 @@ def processing_chunk(input_path, output_without_audio_path, chunk_timestamp):
     
     # Convert the dictionary to a DataFrame
     df = pd.DataFrame(person_data)
-    condition = df['timestamps'].apply(len) >= 10
+    condition = df['timestamps'].apply(len) >= 20
     filtered_df = df[condition]
     print("data:", filtered_df)
     
     # DataFrame to .json file
-    file_path = "output_videos/data.json"
-    json_data = filtered_df.to_json(orient='records')
+    # file_path = "output_videos/data.json"
+    # json_data = filtered_df.to_json(orient='records')
     
     if filtered_df is not None:
-        # Write the data to the JSON file
-        with open(file_path, "w") as json_file:
-            json.dump(json_data, json_file)
-        print("Data saved to:", file_path)
+        # # Write the data to the JSON file
+        # with open(file_path, "w") as json_file:
+        #     json.dump(json_data, json_file)
+        # print("Data saved to:", file_path)
+        
+        # Convert DataFrame to a list of tuples
+        data_to_insert = [tuple(row) for row in filtered_df.values]
+
+        try:
+            delete_query = "DELETE FROM fr_table;"
+            cursor.execute(delete_query)
+            print("All rows deleted from the table.")
+        except psycopg2.Error as e:
+            print("Error deleting data:", e)
+
+        try:
+            insert_query = """
+            INSERT INTO fr_table (thumbnail, name, timestamps, "coverageTime")
+            VALUES (%s, %s, %s, %s);
+            """
+            
+            cursor.executemany(insert_query, data_to_insert)
+            print("Data inserted successfully.")
+        except psycopg2.Error as e:
+            print("Error inserting data:", e)
+
+        conn.commit()
         
         # Define the output CSV file path
         output_csv_path = "output_videos/data.csv"
@@ -416,6 +458,8 @@ def processing_chunk(input_path, output_without_audio_path, chunk_timestamp):
         filtered_df_copy = filtered_df.drop('thumbnail', axis=1)
         filtered_df_copy.to_csv(output_csv_path, index=False)
         print(f"DataFrame saved to '{output_csv_path}'.")
+    else:
+        print ("No person of interest detected!")
         
     # # Remaining data
     # for p in person_data:
@@ -448,45 +492,49 @@ def processing_chunk(input_path, output_without_audio_path, chunk_timestamp):
     # filtered_df.to_csv(output_csv_path, index=False)
     # print(f"DataFrame saved to '{output_csv_path}'.")
     
-def download_chunk(url, input_dir, chunk_duration, audio_dir):
-    print("Running download_chunk")
-    if not os.path.exists(input_dir):
-        os.makedirs(input_dir)
+def download_chunk(url, chunk_filename, chunk_duration, chunk_counter):
+    try:
+        print("Running download_chunk")
+        
+        cmd = [
+            "streamlink",
+            "--hls-duration", str(chunk_duration),
+            "-o",
+            chunk_filename,
+            url,
+            "best",
+            "--hls-segment-threads" , "5",
+            "--hls-live-edge", "99999",
+            "--stream-timeout", "1215",
+            "--force"
+        ]
+        download_start_time = time.time()
+        current_time = datetime.now(pakistan_timezone).time().strftime('%H:%M:%S')
+        subprocess.run(cmd, capture_output=True, text=True)
+        print(f"Downloaded chunk {chunk_counter}")
+        download_end_time = time.time()
+        download_time = download_end_time - download_start_time
+        if download_time < chunk_duration:
+            time.sleep(chunk_duration - download_time)
+        elif download_time == chunk_duration:
+            time.sleep(chunk_duration)
+        print("Chunk downloading time: ", download_time)
+        return current_time
+    except Exception as e:
+        # Capture the error message
+        error_message = str(e)
 
-    if not os.path.exists(audio_dir):
-        os.mkdir(audio_dir)
+        # Specify the file path where you want to save the error message
+        file_path = "error0.txt"
 
-    chunk_filename = os.path.join(input_dir, f"chunk_{chunk_counter}.mp4")
-    audio_path = os.path.join(audio_dir, f"audio_chunk_{chunk_counter}.aac")
-    print("Downloading chunks")
-    cmd = [
-        "streamlink",
-        "--hls-duration", str(chunk_duration),
-        "-o",
-        chunk_filename,
-        url,
-        "best",
-        "--hls-segment-threads" , "5",
-        "--hls-live-edge", "99999",
-        "--stream-timeout", "1215",
-        "--force"
-    ]
-    download_start_time = time.time()
-    current_time = datetime.now(pakistan_timezone).time().strftime('%H:%M:%S')
-    subprocess.run(cmd, capture_output=True, text=True)
-    print(f"Downloaded chunk {chunk_counter}")
-    download_end_time = time.time()
-    download_time = download_end_time - download_start_time
-    if download_time < chunk_duration:
-        time.sleep(chunk_duration - download_time)
-    elif download_time == chunk_duration:
-        time.sleep(chunk_duration)
-    extract_audio(chunk_filename, audio_path)
-    time_dict['audio_path'] = audio_path
-    time_dict['filename'] = chunk_filename
-    time_dict['download_timestamp'] = current_time
-    chunk_queue.put(time_dict)
-    print("Chunk downloading time: ", download_time)
+        # Open the file in write mode ("w" for write)
+        # If the file doesn't exist, it will be created. If it exists, its contents will be overwritten.
+        try:
+            with open(file_path, "w") as file:
+                file.write(error_message)
+            print(f"Error message saved to '{file_path}' successfully.")
+        except Exception as file_error:
+            print(f"Error saving error message to '{file_path}': {file_error}")
 
 # def download_chunks_background(url, input_dir, chunk_duration):
 #     global chunk_counter, chunk_queue
@@ -500,42 +548,86 @@ def download_chunk(url, input_dir, chunk_duration, audio_dir):
 #         print(f"Downloaded chunk {chunk_counter}")
 
 def run_download_chunks():
-    global chunk_queue, time_dict, chunk_counter
-    chunk_queue = queue.Queue()
-    time_dict = {
-            'filename' : '',
-            'download_timestamp' : '00:00:00',
-            'audio_path' : ''
-    }
-    chunk_counter = 0
-    url = "https://www.youtube.com/watch?v=sUKwTVAc0Vo"
-    input_dir = "input_chunks"
-    audio_dir = "audio_chunks"
-    playback_duration = 6                       #playback duration in hours
-    chunk_duration = 20
-    chunk_threshold = int((playback_duration*3600)/chunk_duration)
-    chunk_threshold = int((playback_duration*3600)/chunk_duration)
-    if not os.path.exists(input_dir):
-        os.mkdir(input_dir)
+    try:
+        global chunk_queue, time_dict, chunk_counter, input_dir
+        chunk_queue = queue.Queue()
+        time_dict = {
+                'filename' : '',
+                'download_timestamp' : '00:00:00',
+        }
+        chunk_counter = 0
+        url = "https://www.youtube.com/watch?v=sUKwTVAc0Vo"
+        input_dir = "input_chunks"
         
-    while(1):
-        print("Running run_download_chunks")
-        download_chunk(url, input_dir, chunk_duration, audio_dir)
-        # print("Download timestamp: ", current_time)        
-        chunk_counter += 1
-        
-        if chunk_counter == chunk_threshold:
-            delete_mp4_files(input_dir)
-            chunk_counter = 0
-            while not chunk_queue.empty():
-                item = chunk_queue.get()
-                print("Dequeued item:", item)
-            print("Queue is now empty")
+        if not os.path.exists(input_dir):
+            os.makedirs(input_dir)
 
+        playback_duration = 1                       #playback duration in hours
+        chunk_duration = 10
+        chunk_threshold = int((playback_duration*3600)/chunk_duration)
+        if not os.path.exists(input_dir):
+            os.mkdir(input_dir)
+        
+        while(1):
+            print("Running run_download_chunks")
+            chunk_filename = os.path.join(input_dir, f"chunk_{chunk_counter}.mp4")
+            current_time = download_chunk(url, chunk_filename, chunk_duration, chunk_counter)
+            time_dict['filename'] = chunk_filename
+            time_dict['download_timestamp'] = current_time
             
+            chunk_queue.put(time_dict)
+            print("Download timestamp: ", current_time)        
+            chunk_counter += 1
+            
+            if chunk_counter >= chunk_threshold:
+                delete_mp4_files(input_dir)
+                delete_all_files(audio_dir)
+                delete_mp4_files(output_dir)
+                chunk_counter = 0
+                while not chunk_queue.empty():
+                    item = chunk_queue.get()
+                    print("Dequeued item:", item)
+                print("Queue is now empty")
+    except Exception as e:
+        # Capture the error message
+        error_message = str(e)
+
+        # Specify the file path where you want to save the error message
+        file_path = "error1.txt"
+
+        # Open the file in write mode ("w" for write)
+        # If the file doesn't exist, it will be created. If it exists, its contents will be overwritten.
+        try:
+            with open(file_path, "w") as file:
+                file.write(error_message)
+            print(f"Error message saved to '{file_path}' successfully.")
+        except Exception as file_error:
+            print(f"Error saving error message to '{file_path}': {file_error}")
+
+def delete_all_files(directory_path):
+    """
+    Delete all files within the specified directory.
+
+    Args:
+        directory_path (str): The path to the directory.
+    """
+    # Iterate through all files in the directory
+    for filename in os.listdir(directory_path):
+        file_path = os.path.join(directory_path, filename)
+
+        # Check if it's a file (not a subdirectory)
+        if os.path.isfile(file_path):
+            try:
+                # Delete the file
+                os.remove(file_path)
+                print(f"Deleted file: {file_path}")
+            except OSError as e:
+                print(f"Error deleting file: {file_path} - {e}")
+
+
 def main():
     
-    global images_names, images_embs
+    global images_names, images_embs, output_dir, audio_dir
     
     # Read features
     images_names, images_embs = read_features()
@@ -556,10 +648,14 @@ def main():
     
     output_without_audio_path = "output_without_audio.mp4"
     output_dir = "output_videos"
+    audio_dir = "audio_chunks"
     output_chunk_counter = 0
     # output_path = os.path.join(output_dir, "output.mp4")
     # final_output_video_path = os.path.join(output_dir, "final_output.mp4")
-     
+
+    if not os.path.exists(audio_dir):
+        os.mkdir(audio_dir) 
+    
     if not os.path.exists(output_dir):
         os.mkdir(output_dir)
     
@@ -572,26 +668,34 @@ def main():
         if not chunk_queue.empty():
             input_time_dict = chunk_queue.get()
             input_path = input_time_dict['filename']
-            audio_path = input_time_dict['audio_path']
-            chunk_timestamp = input_time_dict['download_timestamp']
-            chunk_queue.task_done()
-            processing_start = time.time()
-            
-            # Process video
-            processing_chunk(input_path, output_without_audio_path, chunk_timestamp)
+            if os.path.exists(input_path):
+                audio_path = os.path.join(audio_dir, f"audio_chunk_{output_chunk_counter}.aac")
+                chunk_timestamp = input_time_dict['download_timestamp']
+                chunk_queue.task_done()
+                processing_start = time.time()
+                
+                # Extract audio
+                extract_audio(input_path, audio_path)
 
-            # Merge audio into output video
-            chunk_output_path = os.path.join(output_dir, f"chunk_output_{output_chunk_counter}.mp4")
-            print("output path:", chunk_output_path)
-            merge_audio_into_video(output_without_audio_path, audio_path, chunk_output_path)
+                # Process video
+                processing_chunk(input_path, output_without_audio_path, chunk_timestamp)
 
-            # delete_file(audio_path)
-            delete_file(output_without_audio_path)
+                # Merge audio into output video
+                chunk_output_path = os.path.join(output_dir, f"chunk_output_{output_chunk_counter}.mp4")
+                print("output path:", chunk_output_path)
+                merge_audio_into_video(output_without_audio_path, audio_path, chunk_output_path)
 
-            processing_end = time.time()
-            total_processing_time = processing_end - processing_start
-            print("Chunk processing time: ", total_processing_time)
-            output_chunk_counter += 1
+                # delete_file(audio_path)
+                delete_file(output_without_audio_path)
+
+                processing_end = time.time()
+                total_processing_time = processing_end - processing_start
+                print("Chunk processing time: ", total_processing_time)
+                output_chunk_counter += 1
+            else:
+                print(input_path, "not found")
+                output_chunk_counter += 1
+                continue
         else:
             print("Queue is empty.")
             continue
@@ -626,7 +730,4 @@ if __name__=="__main__":
 #         print("Total chunk time:", total_time)
 #         # if chunk_counter % 4320 == 0:
 #         #     delete_mp4_files(output_dir)
-        
-
-
 
